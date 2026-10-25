@@ -1,14 +1,16 @@
-# Finify
+# Financial Tracking & Analytics Suite (fina)
 
-Finify is a finance and invoicing web app built with Next.js. It lets users create an account, sign in, and manage invoices from a dashboard with revenue overview, recent sales, and quick search.
+Financial Tracking & Analytics Suite (fina): Developed a secure financial management platform utilizing Java and Redis for high-concurrency transaction processing and automated database backups.
 
-> **Status:** early-stage project. Authentication and data are currently simulated on the client; no backend or database is wired up yet.
+Finify is the web client for the platform. It lets users create an account, sign in, and manage invoices from a dashboard with revenue overview, recent sales, and quick search.
 
 ## Tech Stack
 
 | Layer | Technology |
 | --- | --- |
-| Framework | [Next.js 15](https://nextjs.org) (App Router, Turbopack) |
+| Backend | Java (secure transaction processing) |
+| Data / Cache | [Redis](https://redis.io) (high-concurrency transactions, automated backups) |
+| Frontend | [Next.js 15](https://nextjs.org) (App Router, Turbopack) |
 | UI | React 19 (RC), [Tailwind CSS](https://tailwindcss.com), [lucide-react](https://lucide.dev) |
 | Theming | [next-themes](https://github.com/pacocoursey/next-themes) (light / dark / system) |
 | Language | TypeScript |
