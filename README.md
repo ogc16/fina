@@ -2,64 +2,89 @@
 
 Financial Tracking & Analytics Suite (fina): Developed a secure financial management platform utilizing Java and Redis for high-concurrency transaction processing and automated database backups.
 
-Finify is the web client for the platform. It lets users create an account, sign in, and manage invoices from a dashboard with revenue overview, recent sales, and quick search.
+## Overview
+
+fina is a backend-focused financial platform that records transactions, tracks balances, and produces analytics. The core is a Java service backed by Redis for fast, concurrent access, with scheduled backups to protect persisted data.
+
+> **Status:** transition in progress. The previous Next.js frontend has been removed; the Java/Redis service is next to be scaffolded.
 
 ## Tech Stack
 
 | Layer | Technology |
 | --- | --- |
-| Backend | Java (secure transaction processing) |
-| Data / Cache | [Redis](https://redis.io) (high-concurrency transactions, automated backups) |
-| Frontend | [Next.js 15](https://nextjs.org) (App Router, Turbopack) |
-| UI | React 19 (RC), [Tailwind CSS](https://tailwindcss.com), [lucide-react](https://lucide.dev) |
-| Theming | [next-themes](https://github.com/pacocoursey/next-themes) (light / dark / system) |
-| Language | TypeScript |
-| Package manager | pnpm (a lockfile is included) |
+| Language / runtime | Java |
+| Data / cache | [Redis](https://redis.io) — high-concurrency transaction processing |
+| Concurrency | [Redisson](https://redisson.org) distributed locks or Redis Lua scripts |
+| Persistence | Hybrid RDB + AOF (`appendfsync everysec`) with automated backups |
+| High availability | Redis Sentinel or Cluster topology with automated failover |
+| API | REST (JSON) |
+| Build tool | Maven or Gradle (to be chosen during scaffolding) |
 
 ## Getting Started
 
-Install dependencies and start the development server:
+The Java service has not been scaffolded yet. Once it is, this section will cover:
 
 ```bash
-pnpm install
-pnpm dev
+# 1. Start Redis
+redis-server
+
+# 2. Build and run the service (command depends on the chosen build tool)
+./mvnw spring-boot:run   # or: ./gradlew bootRun
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+Prerequisites:
 
-### Available Scripts
+- Java 17 or newer
+- Redis 7 or newer
+- Maven or Gradle
 
-| Script | Description |
-| --- | --- |
-| `pnpm dev` | Start the dev server with Turbopack |
-| `pnpm build` | Create a production build |
-| `pnpm start` | Serve the production build |
-| `pnpm lint` | Run ESLint via `next lint` |
-
-## Project Structure
+## Planned Project Structure
 
 ```text
 fina/
-├── public/                          # Static assets
 ├── src/
-│   ├── app/
-│   │   ├── layout.tsx               # Root layout + theme provider
-│   │   ├── page.tsx                 # Landing page
-│   │   ├── auth/
-│   │   │   ├── signin/page.tsx      # Sign-in form
-│   │   │   └── signup/page.tsx      # Sign-up form
-│   │   ├── Home/dashboard/
-│   │   │   ├── page.tsx             # Dashboard shell
-│   │   │   └── components/          # Dashboard widgets
-│   │   ├── components/              # Shared components (button, theme toggle)
-│   │   └── ui/                      # UI helpers and styles
-│   └── lib/
-│       ├── definitions.ts           # Shared TypeScript types (Invoice)
-│       └── utils.ts                 # Utility helpers
-├── next.config.ts
-├── tailwind.config.ts
-└── package.json
+│   ├── main/
+│   │   ├── java/
+│   │   │   └── com/fina/
+│   │   │       ├── api/          # REST controllers
+│   │   │       ├── service/      # Business logic, transaction handling
+│   │   │       ├── repository/   # Redis data access
+│   │   │       ├── model/        # Domain entities
+│   │   │       ├── backup/       # Scheduled backup jobs
+│   │   │       └── config/       # Redis, security, scheduling
+│   │   └── resources/
+│   │       └── application.yml
+│   └── test/java/                # Unit and integration tests
+├── docker-compose.yml            # Redis + service for local development
+├── README.md
+├── CONTRIBUTING.md
+├── CODE_OF_CONDUCT.md
+└── LICENSE
 ```
+
+## Features
+
+- Secure handling of accounts and financial transactions
+- High-concurrency transaction processing via Redis
+- Automated database backups on a schedule
+- Analytics over transaction history (balances, spending, trends)
+- REST API for clients and integrations
+
+## Architecture Goals
+
+| Concern | Recommended Practice |
+| --- | --- |
+| Concurrency & locks | Use Redisson's distributed locks or Redis Lua scripts to handle concurrent resource contention safely. |
+| Data durability | Enable hybrid RDB + AOF persistence with `fsync everysec` for a strong balance between performance and durability. |
+| High availability | Deploy Redis in a Sentinel or Cluster topology to ensure automated failover if the primary node goes down. |
+
+### Persistence Options
+
+| Option | How it works | Trade-off |
+| --- | --- | --- |
+| **RDB** (Redis Database Snapshots) | Point-in-time snapshots of the dataset stored as compact `.rdb` files at configured time or write intervals (e.g., save after *N* changes every *M* seconds). | Fast restores and compact files, but writes since the last snapshot can be lost. |
+| **AOF** (Append-Only File) | Logs every write operation received by the server, synced to disk every second (`fsync everysec`) or on every write. | Maximum durability and a complete operation log, but larger files and slower replay. |
+| **Hybrid** (RDB + AOF) | Combines fast point-in-time snapshot restores with complete operation logs. | Best balance of restore speed and durability at the cost of running both mechanisms. |
 
 ## UML Diagrams
 
@@ -69,187 +94,226 @@ The diagrams below describe the intended system. They are written in [Mermaid](h
 
 ```mermaid
 flowchart LR
-    Visitor((Visitor))
-    User((Registered User))
+    Client((API Client))
+    Analyst((Analyst))
+    Admin((Administrator))
+    Scheduler((Scheduler))
 
-    subgraph Finify["Finify"]
-        UC1([View landing page])
-        UC2([Create account])
-        UC3([Sign in])
-        UC4([Browse dashboard])
-        UC5([Review revenue overview])
-        UC6([View recent sales])
-        UC7([Search])
-        UC8([Manage invoices])
-        UC9([Toggle theme])
+    subgraph Fina["fina"]
+        UC1([Create account])
+        UC2([Record transaction])
+        UC3([View balance])
+        UC4([Query transaction history])
+        UC5([Generate analytics])
+        UC6([Run automated backup])
+        UC7([Restore from backup])
+        UC8([Manage access])
     end
 
-    Visitor --> UC1
-    Visitor --> UC2
-    Visitor --> UC3
-    Visitor --> UC9
+    Client --> UC1
+    Client --> UC2
+    Client --> UC3
+    Client --> UC4
 
-    UC2 -.->|"<<include>>"| UC3
-    User --> UC3
-    User --> UC4
-    User --> UC9
+    Analyst --> UC4
+    Analyst --> UC5
 
-    UC4 -.->|"<<include>>"| UC5
-    UC4 -.->|"<<include>>"| UC6
-    UC4 -.->|"<<include>>"| UC7
-    UC4 -.->|"<<include>>"| UC8
+    Admin --> UC8
+    Admin --> UC7
+
+    Scheduler --> UC6
+    UC6 -.->|"<<include>>"| UC1
 ```
 
-### Component / Architecture Diagram
+### Architecture Diagram
 
 ```mermaid
 flowchart TD
-    subgraph Client["Browser"]
-        Landing["Landing Page<br/>src/app/page.tsx"]
-        SignIn["Sign In Page<br/>auth/signin"]
-        SignUp["Sign Up Page<br/>auth/signup"]
-        Dashboard["Dashboard Page<br/>Home/dashboard"]
-        DashboardCmp["Dashboard Components<br/>overview · recent-sales · search"]
-        Theme["ThemeProvider<br/>next-themes"]
+    subgraph Clients["Clients"]
+        API["REST API Client"]
     end
 
-    subgraph NextApp["Next.js App Router"]
-        Layout["Root Layout<br/>src/app/layout.tsx"]
-        Router["Client-side Router<br/>next/navigation"]
-        Lib["Shared Library<br/>lib/definitions.ts · lib/utils.ts"]
+    subgraph Service["Java Service"]
+        Controllers["API Layer<br/>Controllers"]
+        Services["Service Layer<br/>Transaction logic"]
+        Repos["Repository Layer<br/>Redis access"]
+        Backup["Backup Scheduler"]
+        Config["Config<br/>Redis · Security · Scheduling"]
     end
 
-    subgraph Styling["Styling"]
-        Tailwind["Tailwind CSS"]
-        Icons["lucide-react"]
+    subgraph Data["Data"]
+        Redis[("Redis<br/>high-concurrency store")]
+        Backups[("Backup storage")]
     end
 
-    Layout --> Theme
-    Layout --> Landing
-    Layout --> SignIn
-    Layout --> SignUp
-    Layout --> Dashboard
-    Dashboard --> DashboardCmp
-    SignIn --> Router
-    SignUp --> Router
-    Router --> Dashboard
-    Landing --> Router
-    DashboardCmp --> Lib
-    Landing --> Tailwind
-    SignIn --> Tailwind
-    SignUp --> Tailwind
-    Dashboard --> Tailwind
-    DashboardCmp --> Icons
+    API -->|HTTPS / JSON| Controllers
+    Controllers --> Services
+    Services --> Repos
+    Repos -->|read / write| Redis
+    Backup -->|snapshot| Redis
+    Backup -->|write| Backups
+    Config -.-> Controllers
+    Config -.-> Services
+    Config -.-> Backup
 ```
 
 ### Class Diagram
 
 ```mermaid
 classDiagram
+    class Account {
+        +String id
+        +String ownerName
+        +String email
+        +BigDecimal balance
+        +AccountStatus status
+        +deposit(amount)
+        +withdraw(amount)
+    }
+
+    class Transaction {
+        +String id
+        +String accountId
+        +BigDecimal amount
+        +TransactionType type
+        +Instant timestamp
+        +TransactionStatus status
+    }
+
     class Invoice {
-        +string id
-        +string customer_name
-        +string customer_email
-        +string invoice_date
-        +string invoice_due_date
-        +number invoice_amount
-        +InvoiceStatus invoice_status
-        +SentStatus sent
-        +string customer_id
+        +String id
+        +String accountId
+        +String customerName
+        +String customerEmail
+        +BigDecimal amount
+        +LocalDate issuedOn
+        +LocalDate dueOn
+        +InvoiceStatus status
+    }
+
+    class BackupJob {
+        +String id
+        +Instant startedAt
+        +Instant completedAt
+        +BackupStatus status
+        +run()
+    }
+
+    class TransactionService {
+        +record(Transaction) Transaction
+        +history(accountId) List~Transaction~
+        +balance(accountId) BigDecimal
+    }
+
+    class AccountStatus {
+        <<enumeration>>
+        active
+        suspended
+        closed
+    }
+
+    class TransactionType {
+        <<enumeration>>
+        deposit
+        withdrawal
+        transfer
+    }
+
+    class TransactionStatus {
+        <<enumeration>>
+        pending
+        completed
+        failed
     }
 
     class InvoiceStatus {
         <<enumeration>>
         pending
         paid
+        overdue
     }
 
-    class SentStatus {
+    class BackupStatus {
         <<enumeration>>
-        yes
-        no
+        running
+        success
+        failed
     }
 
-    class Dashboard {
-        +renderOverview()
-        +renderRecentSales()
-        +renderSearch()
-    }
-
-    class AuthForm {
-        +string email
-        +string password
-        +validate()
-        +submit()
-    }
-
-    class SignInForm {
-        +handleSubmit()
-    }
-
-    class SignUpForm {
-        +string name
-        +string confirmPassword
-        +handleSubmit()
-    }
-
-    Invoice --> InvoiceStatus : status
-    Invoice --> SentStatus : sent
-    Dashboard ..> Invoice : displays
-    AuthForm <|-- SignInForm
-    AuthForm <|-- SignUpForm
+    Account "1" --> "*" Transaction : has
+    Account "1" --> "*" Invoice : issued
+    TransactionService --> Transaction : manages
+    TransactionService --> Account : updates
+    BackupJob --> Account : snapshots
+    Account --> AccountStatus
+    Transaction --> TransactionType
+    Transaction --> TransactionStatus
+    Invoice --> InvoiceStatus
+    BackupJob --> BackupStatus
 ```
 
-### Sequence Diagram — Sign In
+### Sequence Diagram — Record a Transaction
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant Page as SignIn Page
-    participant Router as Next.js Router
-    participant Dashboard as Dashboard
+    actor Client
+    participant API as API Controller
+    participant Service as Transaction Service
+    participant Repo as Account Repository
+    participant Redis as Redis
 
-    User->>Page: Enter email + password
-    Page->>Page: Validate required fields
-    alt Missing fields
-        Page-->>User: Show "Email and password are required"
-    else Valid input
-        Page->>Page: Simulate API call (setTimeout)
-        Page->>Router: router.push("/dashboard")
-        Router->>Dashboard: Render dashboard
-        Dashboard-->>User: Show overview and recent sales
+    Client->>API: POST /transactions
+    API->>Service: record(request)
+    Service->>Service: Validate amount and account
+    alt Invalid request
+        Service-->>API: Validation error
+        API-->>Client: 400 Bad Request
+    else Valid request
+        Service->>Repo: load(accountId)
+        Repo->>Redis: GET account:{id}
+        Redis-->>Repo: Account data
+        Repo-->>Service: Account
+        Service->>Service: Apply debit / credit
+        Service->>Repo: save(account, transaction)
+        Repo->>Redis: MULTI / EXEC
+        Redis-->>Repo: OK
+        Service-->>API: Transaction
+        API-->>Client: 201 Created
     end
 ```
 
-### Sequence Diagram — Sign Up
+### Sequence Diagram — Automated Backup
 
 ```mermaid
 sequenceDiagram
-    actor User
-    participant Page as SignUp Page
-    participant Router as Next.js Router
-    participant Dashboard as Dashboard
+    participant Scheduler as Backup Scheduler
+    participant Backup as Backup Service
+    participant Redis as Redis
+    participant Store as Backup Storage
 
-    User->>Page: Enter name, email, password, confirm password
-    Page->>Page: Validate all fields present
-    Page->>Page: Check passwords match and length >= 8
-    alt Validation fails
-        Page-->>User: Show validation error
-    else Validation passes
-        Page->>Page: Simulate API call (setTimeout)
-        Page->>Router: router.push("/dashboard")
-        Router->>Dashboard: Render dashboard
-        Dashboard-->>User: Show overview and recent sales
+    loop On configured interval
+        Scheduler->>Backup: run()
+        Backup->>Redis: BGSAVE / snapshot
+        Redis-->>Backup: Snapshot ready
+        Backup->>Store: Persist snapshot + metadata
+        Store-->>Backup: Stored
+        Backup->>Backup: Record backup status
     end
 ```
 
 ## Roadmap
 
-- [ ] Connect authentication to a real backend / auth provider
-- [ ] Persist invoices in a database
-- [ ] Wire up invoice creation, editing, and export
-- [ ] Enable the Analytics, Reports, and Notifications dashboard tabs
-- [ ] Fix auth redirect paths (`/signing` → `/signin`, dashboard route)
+- [ ] Scaffold the Java service and choose Maven or Gradle
+- [ ] Configure Redis connection, pooling, and security
+- [ ] Add Redisson distributed locks or Lua scripts for concurrent writes
+- [ ] Enable hybrid RDB + AOF persistence with `appendfsync everysec`
+- [ ] Deploy Redis with Sentinel or Cluster for automated failover
+- [ ] Implement accounts, transactions, and invoices
+- [ ] Add automated backup and restore workflow
+- [ ] Add analytics endpoints (balances, spending, trends)
+- [ ] Add authentication and role-based access control
+- [ ] Add unit and integration tests
+- [ ] Add Docker Compose for local development
 
 ## Contributing
 
