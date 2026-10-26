@@ -1,5 +1,9 @@
 # Financial Tracking & Analytics Suite (fina)
 
+[![CI](https://github.com/ogc16/fina/actions/workflows/ci.yml/badge.svg)](https://github.com/ogc16/fina/actions/workflows/ci.yml)
+[![CD](https://github.com/ogc16/fina/actions/workflows/cd.yml/badge.svg)](https://github.com/ogc16/fina/actions/workflows/cd.yml)
+[![Docker Hub](https://img.shields.io/docker/pulls/kenyaone/fina)](https://hub.docker.com/r/kenyaone/fina)
+
 Financial Tracking & Analytics Suite (fina): Developed a secure financial management platform utilizing Java and Redis for high-concurrency transaction processing and automated database backups.
 
 ## Overview
@@ -20,7 +24,8 @@ fina is a backend-focused financial platform that records transactions, tracks b
 | High availability | Redis Sentinel or Cluster topology with automated failover |
 | API | REST (JSON), HTTP Basic auth |
 | Build tool | Maven (wrapper included) |
-| Tests | JUnit 5 + Mockito |
+| Tests | JUnit 5 + Mockito + Testcontainers |
+| CI/CD | GitHub Actions (test, GHCR, optional Docker Hub) |
 
 ## Getting Started
 
@@ -30,7 +35,7 @@ fina is a backend-focused financial platform that records transactions, tracks b
 docker compose up --build
 ```
 
-This starts Redis (RDB + AOF enabled) and the API at [http://localhost:8080](http://localhost:8080).
+This starts Redis (RDB + AOF enabled) and the API at [http://localhost:8080](http://localhost:8080). The API is protected by Basic auth, so use the credentials below.
 
 ### Run locally
 
@@ -44,19 +49,98 @@ redis-server --appendonly yes --appendfsync everysec --save 60 1
 ./mvnw spring-boot:run
 ```
 
-The default credentials are `fina` / `fina-local-dev`. Override them with `FINA_USERNAME` and `FINA_PASSWORD`.
+### Authentication
+
+fina uses HTTP Basic authentication. There is no login page or web UI: when you open a protected URL in a browser, the browser shows its native username/password prompt. That prompt is expected. The app also has no route at `/`; use an API endpoint or the health endpoint instead.
+
+| Setting | Default | Override |
+| --- | --- | --- |
+| Username | `fina` | `FINA_USERNAME` |
+| Password | `fina-local-dev` | `FINA_PASSWORD` |
+
+Enter those values in the browser prompt, or send them explicitly:
 
 ```bash
+# Protected API request
 curl -u fina:fina-local-dev http://localhost:8080/api/accounts
+
+# Public health check (no credentials required)
+curl http://localhost:8080/actuator/health
 ```
+
+For Docker Compose, set the credentials before starting the stack:
+
+```bash
+FINA_USERNAME=my-user FINA_PASSWORD='change-me' docker compose up --build
+```
+
+On PowerShell:
+
+```powershell
+$env:FINA_USERNAME = "my-user"
+$env:FINA_PASSWORD = "change-me"
+docker compose up --build
+```
+
+> Change the defaults outside local development and serve the API over HTTPS. Basic auth sends credentials with every request, so TLS is required in production.
 
 ### Build and test
 
 ```bash
 ./mvnw test              # unit tests
-./mvnw package           # build the jar
+./mvnw verify            # unit + Redis integration tests (requires Docker)
+./mvnw package           # build the jar (skips tests)
 java -jar target/fina-0.0.1-SNAPSHOT.jar
 ```
+
+The integration suite starts a disposable `redis:7.4-alpine` container with Testcontainers, exercises the full account/transaction/invoice/analytics/backup flow, and verifies that concurrent withdrawals are serialized by the Redisson lock. If Docker is unavailable, the integration test is skipped and the unit tests still run.
+
+## CI/CD
+
+Two GitHub Actions workflows live in `.github/workflows/`:
+
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `ci.yml` | Push to `master`/`main`, pull requests | Sets up Java 25, runs `./mvnw -B verify`, uploads Surefire reports |
+| `cd.yml` | Push to `master`, tags matching `v*` | Re-runs verification, publishes a multi-tag image to GHCR, and optionally publishes to Docker Hub |
+
+The CD workflow publishes to `ghcr.io/ogc16/fina` using the built-in `GITHUB_TOKEN`. Docker Hub publishing is enabled by setting the repository variable `DOCKERHUB_USERNAME` and the repository secret `DOCKERHUB_TOKEN` (a Docker Hub access token, not your password). Without those, the Docker Hub job is skipped.
+
+Published image tags include the branch, commit SHA (`sha-...`), semantic version for `v*` tags, and `latest` on the default branch.
+
+### Published image
+
+The service is available on Docker Hub as [`kenyaone/fina`](https://hub.docker.com/r/kenyaone/fina):
+
+```bash
+docker pull kenyaone/fina:latest
+```
+
+The container still needs a Redis instance. For example:
+
+```bash
+docker network create fina-net 2>/dev/null || true
+
+docker run -d --name fina-redis --network fina-net \
+  redis:7.4-alpine redis-server --appendonly yes --appendfsync everysec
+
+docker run --rm -p 8080:8080 --network fina-net \
+  -e REDIS_HOST=fina-redis \
+  -e FINA_USERNAME=fina \
+  -e FINA_PASSWORD=fina-local-dev \
+  kenyaone/fina:latest
+```
+
+Then open a protected API endpoint and enter the credentials from the [Authentication](#authentication) section.
+
+### Push an image manually
+
+```bash
+docker build -t <dockerhub-user>/fina:latest .
+docker push <dockerhub-user>/fina:latest
+```
+
+Replace `<dockerhub-user>` with your Docker Hub username.
 
 ## Project Structure
 
@@ -73,7 +157,7 @@ fina/
 │   │   │   ├── service/          # Business logic, locking, analytics, backups
 │   │   │   └── FinaApplication.java
 │   │   └── resources/application.yml
-│   └── test/java/com/fina/service/ # Unit tests
+│   └── test/java/com/fina/    # Unit + Redis integration tests
 ├── Dockerfile
 ├── docker-compose.yml
 ├── pom.xml
@@ -408,11 +492,12 @@ sequenceDiagram
 - [x] Add authentication
 - [x] Add unit tests
 - [x] Add Docker Compose for local development
+- [x] Add Redis/Testcontainers integration tests
+- [x] Add CI/CD with automated image publishing
 - [ ] Deploy Redis with Sentinel or Cluster for automated failover
 - [ ] Add backup restore workflow
 - [ ] Stream backups to cloud storage (e.g., AWS S3)
 - [ ] Add role-based access control and refresh-token auth
-- [ ] Add Redis/Testcontainers integration tests
 
 ## Contributing
 
