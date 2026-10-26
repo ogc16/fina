@@ -158,6 +158,7 @@ fina/
 │   │   │   └── FinaApplication.java
 │   │   └── resources/application.yml
 │   └── test/java/com/fina/    # Unit + Redis integration tests
+├── .github/workflows/    # CI/CD pipelines
 ├── Dockerfile
 ├── docker-compose.yml
 ├── pom.xml
