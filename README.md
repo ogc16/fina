@@ -51,7 +51,7 @@ redis-server --appendonly yes --appendfsync everysec --save 60 1
 
 ### Authentication
 
-fina uses HTTP Basic authentication. There is no login page or web UI: when you open a protected URL in a browser, the browser shows its native username/password prompt. That prompt is expected. The app also has no route at `/`; use an API endpoint or the health endpoint instead.
+fina uses HTTP Basic authentication. There is no login page or web UI: when you open a protected URL in a browser, the browser shows its native username/password prompt. That prompt is expected. The root URL `/` is public and returns service metadata; protected API endpoints require the credentials below.
 
 | Setting | Default | Override |
 | --- | --- | --- |
@@ -61,6 +61,9 @@ fina uses HTTP Basic authentication. There is no login page or web UI: when you 
 Enter those values in the browser prompt, or send them explicitly:
 
 ```bash
+# Public service metadata (no credentials required)
+curl http://localhost:8080/
+
 # Protected API request
 curl -u fina:fina-local-dev http://localhost:8080/api/accounts
 
@@ -180,7 +183,7 @@ fina/
 
 ## API Reference
 
-All endpoints except `/actuator/health` and `/actuator/info` require Basic auth.
+`/`, `/actuator/health`, and `/actuator/info` are public. All other endpoints require Basic auth.
 
 | Method | Path | Description |
 | --- | --- | --- |
