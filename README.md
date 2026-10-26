@@ -6,56 +6,77 @@ Financial Tracking & Analytics Suite (fina): Developed a secure financial manage
 
 fina is a backend-focused financial platform that records transactions, tracks balances, and produces analytics. The core is a Java service backed by Redis for fast, concurrent access, with scheduled backups to protect persisted data.
 
-> **Status:** transition in progress. The previous Next.js frontend has been removed; the Java/Redis service is next to be scaffolded.
+> **Status:** backend implemented. The previous Next.js frontend has been removed; this repository now contains the Java/Redis service.
 
 ## Tech Stack
 
 | Layer | Technology |
 | --- | --- |
-| Language / runtime | Java |
-| Data / cache | [Redis](https://redis.io) — high-concurrency transaction processing |
-| Concurrency | [Redisson](https://redisson.org) distributed locks or Redis Lua scripts |
+| Language / runtime | Java 25 |
+| Framework | [Spring Boot 4.1](https://spring.io/projects/spring-boot) (Web MVC, Security, Validation, Actuator) |
+| Data / cache | [Redis 7](https://redis.io) — high-concurrency transaction processing |
+| Concurrency | [Redisson 4.8](https://redisson.org) distributed locks (`RLock` / `MultiLock`) |
 | Persistence | Hybrid RDB + AOF (`appendfsync everysec`) with automated backups |
 | High availability | Redis Sentinel or Cluster topology with automated failover |
-| API | REST (JSON) |
-| Build tool | Maven or Gradle (to be chosen during scaffolding) |
+| API | REST (JSON), HTTP Basic auth |
+| Build tool | Maven (wrapper included) |
+| Tests | JUnit 5 + Mockito |
 
 ## Getting Started
 
-The Java service has not been scaffolded yet. Once it is, this section will cover:
+### Run with Docker Compose
 
 ```bash
-# 1. Start Redis
-redis-server
-
-# 2. Build and run the service (command depends on the chosen build tool)
-./mvnw spring-boot:run   # or: ./gradlew bootRun
+docker compose up --build
 ```
 
-Prerequisites:
+This starts Redis (RDB + AOF enabled) and the API at [http://localhost:8080](http://localhost:8080).
 
-- Java 17 or newer
-- Redis 7 or newer
-- Maven or Gradle
+### Run locally
 
-## Planned Project Structure
+Prerequisites: Java 25, Redis 7.
+
+```bash
+# 1. Start Redis (or use: docker compose up -d redis)
+redis-server --appendonly yes --appendfsync everysec --save 60 1
+
+# 2. Run the service
+./mvnw spring-boot:run
+```
+
+The default credentials are `fina` / `fina-local-dev`. Override them with `FINA_USERNAME` and `FINA_PASSWORD`.
+
+```bash
+curl -u fina:fina-local-dev http://localhost:8080/api/accounts
+```
+
+### Build and test
+
+```bash
+./mvnw test              # unit tests
+./mvnw package           # build the jar
+java -jar target/fina-0.0.1-SNAPSHOT.jar
+```
+
+## Project Structure
 
 ```text
 fina/
 ├── src/
 │   ├── main/
-│   │   ├── java/
-│   │   │   └── com/fina/
-│   │   │       ├── api/          # REST controllers
-│   │   │       ├── service/      # Business logic, transaction handling
-│   │   │       ├── repository/   # Redis data access
-│   │   │       ├── model/        # Domain entities
-│   │   │       ├── backup/       # Scheduled backup jobs
-│   │   │       └── config/       # Redis, security, scheduling
-│   │   └── resources/
-│   │       └── application.yml
-│   └── test/java/                # Unit and integration tests
-├── docker-compose.yml            # Redis + service for local development
+│   │   ├── java/com/fina/
+│   │   │   ├── api/              # REST controllers, DTOs, error handling
+│   │   │   ├── config/           # Redisson, Redis codec, security
+│   │   │   ├── exception/        # Domain exceptions
+│   │   │   ├── model/            # Account, Transaction, Invoice, BackupRecord
+│   │   │   ├── repository/       # Redis-backed repositories
+│   │   │   ├── service/          # Business logic, locking, analytics, backups
+│   │   │   └── FinaApplication.java
+│   │   └── resources/application.yml
+│   └── test/java/com/fina/service/ # Unit tests
+├── Dockerfile
+├── docker-compose.yml
+├── pom.xml
 ├── README.md
 ├── CONTRIBUTING.md
 ├── CODE_OF_CONDUCT.md
@@ -64,11 +85,69 @@ fina/
 
 ## Features
 
-- Secure handling of accounts and financial transactions
-- High-concurrency transaction processing via Redis
-- Automated database backups on a schedule
-- Analytics over transaction history (balances, spending, trends)
+- Secure handling of accounts and financial transactions (HTTP Basic auth)
+- High-concurrency transaction processing with per-account Redisson locks
+- Atomic transfers using a `MultiLock` over both accounts
+- Automated database backups on a schedule (`BGSAVE` via Spring `@Scheduled`)
+- Analytics over transaction history (balances, deposits, withdrawals, invoices)
+- Invoice lifecycle with automatic overdue marking
 - REST API for clients and integrations
+
+## API Reference
+
+All endpoints except `/actuator/health` and `/actuator/info` require Basic auth.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/api/accounts` | Create an account |
+| `GET` | `/api/accounts` | List accounts |
+| `GET` | `/api/accounts/{id}` | Get an account |
+| `POST` | `/api/accounts/{id}/deposit` | Deposit funds |
+| `POST` | `/api/accounts/{id}/withdraw` | Withdraw funds |
+| `GET` | `/api/accounts/{id}/transactions` | Account transaction history |
+| `POST` | `/api/accounts/{id}/close` | Close an account (requires zero balance) |
+| `POST` | `/api/transfers` | Transfer between accounts |
+| `GET` | `/api/transactions` | List all transactions |
+| `GET` | `/api/transactions/{id}` | Get a transaction |
+| `POST` | `/api/invoices` | Create an invoice |
+| `GET` | `/api/invoices` | List invoices |
+| `GET` | `/api/invoices/{id}` | Get an invoice |
+| `GET` | `/api/invoices/account/{accountId}` | Invoices for an account |
+| `POST` | `/api/invoices/{id}/pay` | Mark an invoice paid |
+| `GET` | `/api/analytics/summary` | Platform-wide analytics |
+| `GET` | `/api/analytics/accounts/{id}` | Per-account analytics |
+| `POST` | `/api/admin/backups` | Trigger an immediate backup |
+| `GET` | `/api/admin/backups` | List backup history |
+
+Example:
+
+```bash
+curl -u fina:fina-local-dev -X POST http://localhost:8080/api/accounts \
+  -H "Content-Type: application/json" \
+  -d '{"ownerName":"Ada Lovelace","email":"ada@example.com","initialBalance":100.00}'
+
+curl -u fina:fina-local-dev -X POST http://localhost:8080/api/accounts/{id}/deposit \
+  -H "Content-Type: application/json" \
+  -d '{"amount":25.50,"description":"salary"}'
+```
+
+## Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `REDIS_HOST` | `localhost` | Redis host |
+| `REDIS_PORT` | `6379` | Redis port |
+| `REDIS_PASSWORD` | empty | Redis password |
+| `REDIS_DATABASE` | `0` | Redis database index |
+| `FINA_USERNAME` | `fina` | API basic-auth username |
+| `FINA_PASSWORD` | `fina-local-dev` | API basic-auth password |
+| `FINA_BACKUP_ENABLED` | `true` | Enable scheduled backups |
+| `FINA_BACKUP_CRON` | `0 0 * * * *` | Backup schedule (hourly) |
+| `FINA_BACKUP_DIRECTORY` | empty | Local directory for copied `.rdb` files |
+| `FINA_REDIS_DUMP_PATH` | `dump.rdb` | Path to Redis `dump.rdb` |
+| `FINA_INVOICE_OVERDUE_CRON` | `0 5 0 * * *` | Daily overdue-invoice sweep |
+
+> Change the default credentials outside local development.
 
 ## Architecture Goals
 
@@ -85,6 +164,13 @@ fina/
 | **RDB** (Redis Database Snapshots) | Point-in-time snapshots of the dataset stored as compact `.rdb` files at configured time or write intervals (e.g., save after *N* changes every *M* seconds). | Fast restores and compact files, but writes since the last snapshot can be lost. |
 | **AOF** (Append-Only File) | Logs every write operation received by the server, synced to disk every second (`fsync everysec`) or on every write. | Maximum durability and a complete operation log, but larger files and slower replay. |
 | **Hybrid** (RDB + AOF) | Combines fast point-in-time snapshot restores with complete operation logs. | Best balance of restore speed and durability at the cost of running both mechanisms. |
+
+### Backup Automation
+
+| Approach | How it works |
+| --- | --- |
+| **Self-hosted automation** | Automated cron jobs or container orchestration tasks (e.g., Kubernetes CronJobs) execute the `BGSAVE` command to trigger background snapshots and stream the resulting `.rdb` files to cloud storage (e.g., AWS S3). |
+| **Java-driven backups** | The Java application issues administrative persistence commands (such as `BGSAVE` via Jedis or Redisson) based on scheduled internal triggers (e.g., Spring `@Scheduled` tasks). |
 
 ## UML Diagrams
 
@@ -174,10 +260,12 @@ classDiagram
     class Transaction {
         +String id
         +String accountId
+        +String counterpartyAccountId
         +BigDecimal amount
         +TransactionType type
-        +Instant timestamp
         +TransactionStatus status
+        +String description
+        +Instant timestamp
     }
 
     class Invoice {
@@ -191,18 +279,20 @@ classDiagram
         +InvoiceStatus status
     }
 
-    class BackupJob {
+    class BackupRecord {
         +String id
         +Instant startedAt
         +Instant completedAt
         +BackupStatus status
-        +run()
+        +String message
+        +String filePath
     }
 
     class TransactionService {
-        +record(Transaction) Transaction
+        +deposit(accountId, amount) Transaction
+        +withdraw(accountId, amount) Transaction
+        +transfer(from, to, amount) List~Transaction~
         +history(accountId) List~Transaction~
-        +balance(accountId) BigDecimal
     }
 
     class AccountStatus {
@@ -216,12 +306,12 @@ classDiagram
         <<enumeration>>
         deposit
         withdrawal
-        transfer
+        transfer_in
+        transfer_out
     }
 
     class TransactionStatus {
         <<enumeration>>
-        pending
         completed
         failed
     }
@@ -244,12 +334,12 @@ classDiagram
     Account "1" --> "*" Invoice : issued
     TransactionService --> Transaction : manages
     TransactionService --> Account : updates
-    BackupJob --> Account : snapshots
+    BackupRecord --> Account : snapshots
     Account --> AccountStatus
     Transaction --> TransactionType
     Transaction --> TransactionStatus
     Invoice --> InvoiceStatus
-    BackupJob --> BackupStatus
+    BackupRecord --> BackupStatus
 ```
 
 ### Sequence Diagram — Record a Transaction
@@ -258,27 +348,29 @@ classDiagram
 sequenceDiagram
     actor Client
     participant API as API Controller
+    participant Lock as Redisson Lock Service
     participant Service as Transaction Service
-    participant Repo as Account Repository
+    participant Repo as Redis Repositories
     participant Redis as Redis
 
-    Client->>API: POST /transactions
-    API->>Service: record(request)
-    Service->>Service: Validate amount and account
-    alt Invalid request
-        Service-->>API: Validation error
-        API-->>Client: 400 Bad Request
-    else Valid request
-        Service->>Repo: load(accountId)
-        Repo->>Redis: GET account:{id}
+    Client->>API: POST /api/accounts/{id}/deposit
+    API->>Service: deposit(accountId, amount)
+    Service->>Lock: acquire fina:lock:account:{id}
+    alt Lock not acquired
+        Lock-->>API: Conflict (409)
+    else Lock acquired
+        Lock->>Service: run action
+        Service->>Repo: findById(accountId)
+        Repo->>Redis: HGET fina:accounts
         Redis-->>Repo: Account data
         Repo-->>Service: Account
-        Service->>Service: Apply debit / credit
-        Service->>Repo: save(account, transaction)
-        Repo->>Redis: MULTI / EXEC
+        Service->>Service: Validate status, amount, funds
+        Service->>Repo: save(updated account + transaction)
+        Repo->>Redis: HSET fina:accounts / fina:transactions
         Redis-->>Repo: OK
+        Service->>Lock: release
         Service-->>API: Transaction
-        API-->>Client: 201 Created
+        API-->>Client: 200 OK
     end
 ```
 
@@ -286,34 +378,41 @@ sequenceDiagram
 
 ```mermaid
 sequenceDiagram
-    participant Scheduler as Backup Scheduler
+    participant Scheduler as Spring @Scheduled
     participant Backup as Backup Service
     participant Redis as Redis
-    participant Store as Backup Storage
+    participant Store as Backup Directory
 
-    loop On configured interval
-        Scheduler->>Backup: run()
-        Backup->>Redis: BGSAVE / snapshot
-        Redis-->>Backup: Snapshot ready
-        Backup->>Store: Persist snapshot + metadata
-        Store-->>Backup: Stored
-        Backup->>Backup: Record backup status
+    loop Every FINA_BACKUP_CRON interval
+        Scheduler->>Backup: scheduledBackup()
+        Backup->>Redis: BGSAVE
+        loop Poll until LASTSAVE advances (max 30s)
+            Backup->>Redis: LASTSAVE
+        end
+        alt FINA_BACKUP_DIRECTORY configured
+            Backup->>Store: Copy dump.rdb to dump-<timestamp>.rdb
+        end
+        Backup->>Redis: Record BackupRecord (RUNNING -> SUCCESS/FAILED)
     end
 ```
 
 ## Roadmap
 
-- [ ] Scaffold the Java service and choose Maven or Gradle
-- [ ] Configure Redis connection, pooling, and security
-- [ ] Add Redisson distributed locks or Lua scripts for concurrent writes
-- [ ] Enable hybrid RDB + AOF persistence with `appendfsync everysec`
+- [x] Scaffold the Java service with Maven
+- [x] Configure Redis connection and pooling
+- [x] Add Redisson distributed locks for concurrent writes
+- [x] Enable hybrid RDB + AOF persistence in Docker Compose
+- [x] Implement accounts, transactions, and invoices
+- [x] Add automated `BGSAVE` backup workflow
+- [x] Add analytics endpoints (balances, spending, trends)
+- [x] Add authentication
+- [x] Add unit tests
+- [x] Add Docker Compose for local development
 - [ ] Deploy Redis with Sentinel or Cluster for automated failover
-- [ ] Implement accounts, transactions, and invoices
-- [ ] Add automated backup and restore workflow
-- [ ] Add analytics endpoints (balances, spending, trends)
-- [ ] Add authentication and role-based access control
-- [ ] Add unit and integration tests
-- [ ] Add Docker Compose for local development
+- [ ] Add backup restore workflow
+- [ ] Stream backups to cloud storage (e.g., AWS S3)
+- [ ] Add role-based access control and refresh-token auth
+- [ ] Add Redis/Testcontainers integration tests
 
 ## Contributing
 

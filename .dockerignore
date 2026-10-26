@@ -1,0 +1,14 @@
+target/
+.git/
+.idea/
+.vscode/
+*.iml
+*.log
+.env
+.env.*
+backups/
+docker-compose.yml
+README.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+LICENSE

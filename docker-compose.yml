@@ -1,0 +1,47 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --aof-use-rdb-preamble
+      - "yes"
+      - --save
+      - "60"
+      - "1"
+      - --dir
+      - /data
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      FINA_USERNAME: ${FINA_USERNAME:-fina}
+      FINA_PASSWORD: ${FINA_PASSWORD:-fina-local-dev}
+      FINA_BACKUP_DIRECTORY: /backups
+      FINA_REDIS_DUMP_PATH: /redis-data/dump.rdb
+    volumes:
+      - redis-data:/redis-data:ro
+      - backups:/backups
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:
+  backups:
