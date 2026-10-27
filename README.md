@@ -6,6 +6,13 @@
 
 Financial Tracking & Analytics Suite (fina): Developed a secure financial management platform utilizing Java and Redis for high-concurrency transaction processing and automated database backups.
 
+## Why We Chose These Technologies
+
+- **Java + Spring Boot** - Financial systems require correctness above all else. Java's strong typing, mature security features, and battle-tested ecosystem allow us to enforce strict invariants like `Assets = Liabilities + Equity` whilst also having enterprise-grade tooling for authentication, validation, and testing.
+- **Redis** - Speed and safety are critical for money movement. Redis allows for sub-millisecond reads and writes for balances and transfers, whilst Redisson distributed locks prevent race conditions. With RDB + AOF persistence and automated backups, we get the performance of an in-memory store without sacrificing durability.
+- **Prometheus** - For a financial service, you need to know when something goes wrong before your users do. Prometheus allows us to instrument both business-critical metrics (`fina_transactions_total`, ledger activity, backup failures) and infrastructure metrics (JVM, HTTP, Redis), all with low overhead and powerful alerting capabilities.
+- **Grafana** - Metrics are only useful if they're actionable. With our pre-provisioned `fina overview` dashboard, operators can get a real-time view of transaction volume, failures, latency, ledger health, and backup status all in one place. This allows for instant visibility during demos, audits, and on-call incidents.
+
 ## Overview
 
 fina is a backend-focused financial platform that records transactions, tracks balances, and produces analytics. The core is a Java service backed by Redis for fast, concurrent access, with scheduled backups to protect persisted data.
@@ -625,10 +632,3 @@ Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and ou
 ## License
 
 Released under the [MIT License](LICENSE). © 2026 Caleb Ngeno.
-
-## Why We Chose These Technologies
-
-- **Java + Spring Boot** - Financial systems require correctness above all else. Java's strong typing, mature security features, and battle-tested ecosystem allow us to enforce strict invariants like `Assets = Liabilities + Equity` whilst also having enterprise-grade tooling for authentication, validation, and testing.
-- **Redis** - Speed and safety are critical for money movement. Redis allows for sub-millisecond reads and writes for balances and transfers, whilst Redisson distributed locks prevent race conditions. With RDB + AOF persistence and automated backups, we get the performance of an in-memory store without sacrificing durability.
-- **Prometheus** - For a financial service, you need to know when something goes wrong before your users do. Prometheus allows us to instrument both business-critical metrics (`fina_transactions_total`, ledger activity, backup failures) and infrastructure metrics (JVM, HTTP, Redis), all with low overhead and powerful alerting capabilities.
-- **Grafana** - Metrics are only useful if they're actionable. With our pre-provisioned `fina overview` dashboard, operators can get a real-time view of transaction volume, failures, latency, ledger health, and backup status all in one place. This allows for instant visibility during demos, audits, and on-call incidents.
