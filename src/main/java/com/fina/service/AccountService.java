@@ -18,10 +18,16 @@ public class AccountService {
 
     private final AccountRepository accountRepository;
     private final LockService lockService;
+    private final LedgerService ledgerService;
 
-    public AccountService(AccountRepository accountRepository, LockService lockService) {
+    public AccountService(
+            AccountRepository accountRepository,
+            LockService lockService,
+            LedgerService ledgerService
+    ) {
         this.accountRepository = accountRepository;
         this.lockService = lockService;
+        this.ledgerService = ledgerService;
     }
 
     public Account create(CreateAccountRequest request) {
@@ -39,7 +45,11 @@ public class AccountService {
                 now,
                 now
         );
-        return accountRepository.save(account);
+        Account saved = accountRepository.save(account);
+        if (openingBalance.signum() > 0) {
+            ledgerService.postAccountOpening(saved.id(), openingBalance);
+        }
+        return saved;
     }
 
     public Account get(String id) {

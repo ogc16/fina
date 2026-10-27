@@ -3,6 +3,7 @@ package com.fina.service;
 import com.fina.exception.ConflictException;
 import com.fina.exception.InsufficientFundsException;
 import com.fina.exception.ResourceNotFoundException;
+import com.fina.metrics.FinaMetrics;
 import com.fina.model.Account;
 import com.fina.model.AccountStatus;
 import com.fina.model.Transaction;
@@ -14,9 +15,11 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 @Service
 public class TransactionService {
@@ -24,33 +27,51 @@ public class TransactionService {
     private final AccountRepository accountRepository;
     private final TransactionRepository transactionRepository;
     private final LockService lockService;
+    private final LedgerService ledgerService;
+    private final FinaMetrics metrics;
 
     public TransactionService(
             AccountRepository accountRepository,
             TransactionRepository transactionRepository,
-            LockService lockService
+            LockService lockService,
+            LedgerService ledgerService,
+            FinaMetrics metrics
     ) {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.lockService = lockService;
+        this.ledgerService = ledgerService;
+        this.metrics = metrics;
     }
 
     public Transaction deposit(String accountId, BigDecimal amount, String description) {
-        BigDecimal normalized = normalizeAmount(amount);
-        return lockService.withLock(AccountService.lockKey(accountId), () -> {
-            Account account = requireActiveAccount(accountId);
-            accountRepository.save(account.withBalance(account.balance().add(normalized)));
-            return record(accountId, null, normalized, TransactionType.DEPOSIT, description);
+        return measured("deposit", () -> {
+            BigDecimal normalized = normalizeAmount(amount);
+            return lockService.withLock(AccountService.lockKey(accountId), () -> {
+                Account account = requireActiveAccount(accountId);
+                accountRepository.save(account.withBalance(account.balance().add(normalized)));
+                Transaction transaction = record(
+                        accountId, null, normalized, TransactionType.DEPOSIT, description
+                );
+                ledgerService.postDeposit(transaction.id(), accountId, normalized, description);
+                return transaction;
+            });
         });
     }
 
     public Transaction withdraw(String accountId, BigDecimal amount, String description) {
-        BigDecimal normalized = normalizeAmount(amount);
-        return lockService.withLock(AccountService.lockKey(accountId), () -> {
-            Account account = requireActiveAccount(accountId);
-            ensureFunds(account, normalized);
-            accountRepository.save(account.withBalance(account.balance().subtract(normalized)));
-            return record(accountId, null, normalized, TransactionType.WITHDRAWAL, description);
+        return measured("withdraw", () -> {
+            BigDecimal normalized = normalizeAmount(amount);
+            return lockService.withLock(AccountService.lockKey(accountId), () -> {
+                Account account = requireActiveAccount(accountId);
+                ensureFunds(account, normalized);
+                accountRepository.save(account.withBalance(account.balance().subtract(normalized)));
+                Transaction transaction = record(
+                        accountId, null, normalized, TransactionType.WITHDRAWAL, description
+                );
+                ledgerService.postWithdrawal(transaction.id(), accountId, normalized, description);
+                return transaction;
+            });
         });
     }
 
@@ -60,30 +81,35 @@ public class TransactionService {
             BigDecimal amount,
             String description
     ) {
-        if (fromAccountId.equals(toAccountId)) {
-            throw new IllegalArgumentException("Source and destination accounts must differ");
-        }
-        BigDecimal normalized = normalizeAmount(amount);
+        return measured("transfer", () -> {
+            if (fromAccountId.equals(toAccountId)) {
+                throw new IllegalArgumentException("Source and destination accounts must differ");
+            }
+            BigDecimal normalized = normalizeAmount(amount);
 
-        return lockService.withLocks(
-                List.of(AccountService.lockKey(fromAccountId), AccountService.lockKey(toAccountId)),
-                () -> {
-                    Account source = requireActiveAccount(fromAccountId);
-                    Account destination = requireActiveAccount(toAccountId);
-                    ensureFunds(source, normalized);
+            return lockService.withLocks(
+                    List.of(AccountService.lockKey(fromAccountId), AccountService.lockKey(toAccountId)),
+                    () -> {
+                        Account source = requireActiveAccount(fromAccountId);
+                        Account destination = requireActiveAccount(toAccountId);
+                        ensureFunds(source, normalized);
 
-                    accountRepository.save(source.withBalance(source.balance().subtract(normalized)));
-                    accountRepository.save(destination.withBalance(destination.balance().add(normalized)));
+                        accountRepository.save(source.withBalance(source.balance().subtract(normalized)));
+                        accountRepository.save(destination.withBalance(destination.balance().add(normalized)));
 
-                    Transaction outgoing = record(
-                            fromAccountId, toAccountId, normalized, TransactionType.TRANSFER_OUT, description
-                    );
-                    Transaction incoming = record(
-                            toAccountId, fromAccountId, normalized, TransactionType.TRANSFER_IN, description
-                    );
-                    return List.of(outgoing, incoming);
-                }
-        );
+                        Transaction outgoing = record(
+                                fromAccountId, toAccountId, normalized, TransactionType.TRANSFER_OUT, description
+                        );
+                        Transaction incoming = record(
+                                toAccountId, fromAccountId, normalized, TransactionType.TRANSFER_IN, description
+                        );
+                        ledgerService.postTransfer(
+                                outgoing.id(), fromAccountId, toAccountId, normalized, description
+                        );
+                        return List.of(outgoing, incoming);
+                    }
+            );
+        });
     }
 
     public List<Transaction> history(String accountId) {
@@ -137,6 +163,18 @@ public class TransactionService {
                 Instant.now()
         );
         return transactionRepository.save(transaction);
+    }
+
+    private <T> T measured(String operation, Supplier<T> action) {
+        long startedAt = System.nanoTime();
+        try {
+            T result = action.get();
+            metrics.recordTransaction(operation, true, Duration.ofNanos(System.nanoTime() - startedAt));
+            return result;
+        } catch (RuntimeException exception) {
+            metrics.recordTransaction(operation, false, Duration.ofNanos(System.nanoTime() - startedAt));
+            throw exception;
+        }
     }
 
     private BigDecimal normalizeAmount(BigDecimal amount) {

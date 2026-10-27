@@ -2,6 +2,7 @@ package com.fina.service;
 
 import com.fina.exception.ConflictException;
 import com.fina.exception.InsufficientFundsException;
+import com.fina.metrics.FinaMetrics;
 import com.fina.model.Account;
 import com.fina.model.AccountStatus;
 import com.fina.model.Transaction;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -26,6 +28,8 @@ import java.util.function.Supplier;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -53,11 +57,18 @@ class TransactionServiceTest {
     @Mock
     private TransactionRepository transactionRepository;
 
+    @Mock
+    private LedgerService ledgerService;
+
     private TransactionService transactionService;
+    private FinaMetrics metrics;
 
     @BeforeEach
     void setUp() {
-        transactionService = new TransactionService(accountRepository, transactionRepository, DIRECT_LOCKS);
+        metrics = new FinaMetrics(new SimpleMeterRegistry(), true);
+        transactionService = new TransactionService(
+                accountRepository, transactionRepository, DIRECT_LOCKS, ledgerService, metrics
+        );
         lenient().when(accountRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(transactionRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
@@ -77,6 +88,7 @@ class TransactionServiceTest {
         verify(accountRepository).save(captor.capture());
         assertEquals(0, new BigDecimal("125.50").compareTo(captor.getValue().balance()));
         verify(transactionRepository).save(any(Transaction.class));
+        verify(ledgerService).postDeposit(anyString(), eq("account-1"), any(), eq("salary"));
     }
 
     @Test
@@ -138,6 +150,9 @@ class TransactionServiceTest {
         assertEquals(0, new BigDecimal("70.00").compareTo(savedSource.balance()));
         assertEquals(0, new BigDecimal("80.00").compareTo(savedDestination.balance()));
         verify(transactionRepository, times(2)).save(any(Transaction.class));
+        verify(ledgerService).postTransfer(
+                anyString(), eq("source"), eq("destination"), any(), eq("rent")
+        );
     }
 
     @Test

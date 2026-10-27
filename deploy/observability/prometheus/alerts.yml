@@ -1,0 +1,83 @@
+groups:
+  - name: fina-availability
+    rules:
+      - alert: FinaServiceDown
+        expr: up{job="fina"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: fina is not responding to Prometheus scrapes
+          description: Prometheus has failed to scrape fina for more than 2 minutes.
+
+      - alert: FinaHighErrorRate
+        expr: |
+          sum(rate(http_server_requests_seconds_count{job="fina",status=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(http_server_requests_seconds_count{job="fina"}[5m])), 0.001)
+          > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: fina 5xx error rate is above 5%
+          description: The five-minute 5xx ratio has exceeded 5% for 10 minutes.
+
+      - alert: FinaHighLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(http_server_requests_seconds_bucket{job="fina"}[5m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: fina p95 latency is above one second
+          description: The p95 HTTP request latency has exceeded 1s for 10 minutes.
+
+  - name: fina-business
+    rules:
+      - alert: FinaTransactionFailures
+        expr: sum(rate(fina_transactions_total{job="fina",result="failure"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: fina business transactions are failing
+          description: At least one deposit, withdrawal, or transfer has failed in the last five minutes.
+
+      - alert: FinaBackupStale
+        expr: |
+          (time() - fina_backup_last_success_timestamp_seconds{job="fina"} > 7200)
+          and on() (fina_backup_enabled{job="fina"} == 1)
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: fina has no recent successful Redis backup
+          description: The latest successful backup is more than two hours old.
+
+      - alert: FinaBackupFailed
+        expr: increase(fina_backups_total{job="fina",status="failed"}[1h]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: fina Redis backup failed
+          description: A Redis backup attempt failed during the last hour.
+
+  - name: fina-runtime
+    rules:
+      - alert: FinaHighHeapUsage
+        expr: |
+          sum(jvm_memory_used_bytes{job="fina",area="heap"})
+          /
+          clamp_min(sum(jvm_memory_max_bytes{job="fina",area="heap"}), 1)
+          > 0.9
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: fina JVM heap usage is above 90%
+          description: Heap usage has exceeded 90% of the maximum for 15 minutes.

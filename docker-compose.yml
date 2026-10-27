@@ -1,6 +1,7 @@
 services:
   redis:
     image: redis:7.4-alpine
+    restart: unless-stopped
     command:
       - redis-server
       - --appendonly
@@ -14,8 +15,6 @@ services:
       - "1"
       - --dir
       - /data
-    ports:
-      - "6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -26,6 +25,7 @@ services:
 
   app:
     build: .
+    restart: unless-stopped
     ports:
       - "8080:8080"
     environment:

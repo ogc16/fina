@@ -1,5 +1,6 @@
 package com.fina.service;
 
+import com.fina.metrics.FinaMetrics;
 import com.fina.model.BackupRecord;
 import com.fina.model.BackupStatus;
 import com.fina.repository.BackupRepository;
@@ -30,6 +31,7 @@ public class BackupService {
 
     private final BackupRepository backupRepository;
     private final StringRedisTemplate redisTemplate;
+    private final FinaMetrics metrics;
     private final boolean enabled;
     private final String directory;
     private final String redisDumpPath;
@@ -37,12 +39,14 @@ public class BackupService {
     public BackupService(
             BackupRepository backupRepository,
             StringRedisTemplate redisTemplate,
+            FinaMetrics metrics,
             @Value("${fina.backup.enabled:true}") boolean enabled,
             @Value("${fina.backup.directory:}") String directory,
             @Value("${fina.backup.redis-dump-path:dump.rdb}") String redisDumpPath
     ) {
         this.backupRepository = backupRepository;
         this.redisTemplate = redisTemplate;
+        this.metrics = metrics;
         this.enabled = enabled;
         this.directory = directory;
         this.redisDumpPath = redisDumpPath;
@@ -62,6 +66,7 @@ public class BackupService {
     }
 
     public BackupRecord trigger() {
+        long startedAtNanos = System.nanoTime();
         Instant startedAt = Instant.now();
         String id = UUID.randomUUID().toString();
         backupRepository.save(new BackupRecord(
@@ -82,6 +87,11 @@ public class BackupService {
                     id, startedAt, Instant.now(), BackupStatus.SUCCESS, message, filePath
             );
             backupRepository.save(completed);
+            metrics.recordBackup(
+                    BackupStatus.SUCCESS,
+                    Duration.ofNanos(System.nanoTime() - startedAtNanos),
+                    completed.completedAt()
+            );
             return completed;
         } catch (Exception exception) {
             log.error("Backup {} failed", id, exception);
@@ -94,6 +104,11 @@ public class BackupService {
                     null
             );
             backupRepository.save(failed);
+            metrics.recordBackup(
+                    BackupStatus.FAILED,
+                    Duration.ofNanos(System.nanoTime() - startedAtNanos),
+                    null
+            );
             return failed;
         }
     }

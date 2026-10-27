@@ -22,7 +22,9 @@ public class RootController {
                         "transfers", "/api/transfers",
                         "invoices", "/api/invoices",
                         "analytics", "/api/analytics/summary",
-                        "backups", "/api/admin/backups"
+                        "backups", "/api/admin/backups",
+                        "ledger", "/api/admin/ledger/trial-balance",
+                        "metrics", "/actuator/prometheus"
                 )
         );
     }

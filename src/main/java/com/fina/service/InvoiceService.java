@@ -28,15 +28,18 @@ public class InvoiceService {
     private final InvoiceRepository invoiceRepository;
     private final AccountRepository accountRepository;
     private final LockService lockService;
+    private final LedgerService ledgerService;
 
     public InvoiceService(
             InvoiceRepository invoiceRepository,
             AccountRepository accountRepository,
-            LockService lockService
+            LockService lockService,
+            LedgerService ledgerService
     ) {
         this.invoiceRepository = invoiceRepository;
         this.accountRepository = accountRepository;
         this.lockService = lockService;
+        this.ledgerService = ledgerService;
     }
 
     public Invoice create(CreateInvoiceRequest request) {
@@ -54,7 +57,9 @@ public class InvoiceService {
                 InvoiceStatus.PENDING,
                 Instant.now()
         );
-        return invoiceRepository.save(invoice);
+        Invoice saved = invoiceRepository.save(invoice);
+        ledgerService.postInvoice(saved.id(), saved.amount(), "Invoice issued to " + saved.customerName());
+        return saved;
     }
 
     public Invoice get(String id) {
@@ -79,7 +84,11 @@ public class InvoiceService {
             if (invoice.status() == InvoiceStatus.PAID) {
                 throw new ConflictException("Invoice is already paid: " + id);
             }
-            return invoiceRepository.save(invoice.withStatus(InvoiceStatus.PAID));
+            Invoice paid = invoiceRepository.save(invoice.withStatus(InvoiceStatus.PAID));
+            ledgerService.postInvoicePayment(
+                    paid.id(), paid.amount(), "Payment received for invoice " + paid.id()
+            );
+            return paid;
         });
     }
 

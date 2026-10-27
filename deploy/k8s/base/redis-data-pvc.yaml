@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: fina-redis-data
+  namespace: fina
+  labels:
+    app.kubernetes.io/name: fina
+    app.kubernetes.io/component: redis
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi

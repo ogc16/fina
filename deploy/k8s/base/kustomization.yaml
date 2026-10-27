@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: fina
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - redis-data-pvc.yaml
+  - backup-pvc.yaml
+  - redis.yaml
+  - app.yaml
+  - ingress.yaml
+  - hpa.yaml
+  - pdb.yaml
+
+images:
+  - name: kenyaone/fina
+    newTag: latest

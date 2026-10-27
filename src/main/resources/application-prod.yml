@@ -1,0 +1,12 @@
+management:
+  endpoint:
+    health:
+      show-details: never
+  metrics:
+    tags:
+      environment: ${DEPLOYMENT_ENVIRONMENT:production}
+
+logging:
+  structured:
+    format:
+      console: ecs

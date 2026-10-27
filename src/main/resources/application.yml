@@ -1,6 +1,8 @@
 spring:
   application:
     name: fina
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -11,6 +13,8 @@ spring:
 
 server:
   port: ${PORT:8080}
+  shutdown: graceful
+  forward-headers-strategy: framework
 
 fina:
   security:
@@ -21,6 +25,7 @@ fina:
     cron: ${FINA_BACKUP_CRON:0 0 * * * *}
     directory: ${FINA_BACKUP_DIRECTORY:}
     redis-dump-path: ${FINA_REDIS_DUMP_PATH:dump.rdb}
+    max-age: ${FINA_BACKUP_MAX_AGE:2h}
   invoice:
     overdue-cron: ${FINA_INVOICE_OVERDUE_CRON:0 5 0 * * *}
 
@@ -28,10 +33,29 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: when-authorized
+      probes:
+        enabled: true
+      group:
+        liveness:
+          include: livenessState
+        readiness:
+          include: readinessState,redis
+        backup:
+          include: backupHealth
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  prometheus:
+    metrics:
+      export:
+        enabled: true
 
 logging:
   level:

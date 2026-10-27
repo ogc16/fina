@@ -22,7 +22,10 @@ fina is a backend-focused financial platform that records transactions, tracks b
 | Concurrency | [Redisson 4.8](https://redisson.org) distributed locks (`RLock` / `MultiLock`) |
 | Persistence | Hybrid RDB + AOF (`appendfsync everysec`) with automated backups |
 | High availability | Redis Sentinel or Cluster topology with automated failover |
+| Accounting | Append-only double-entry ledger (`Assets = Liabilities + Equity`) |
 | API | REST (JSON), HTTP Basic auth |
+| Observability | Micrometer, Prometheus, Grafana, Alertmanager |
+| Deployment | Docker Compose, Kubernetes (Kustomize, HPA, PDB, probes) |
 | Build tool | Maven (wrapper included) |
 | Tests | JUnit 5 + Mockito + Testcontainers |
 | CI/CD | GitHub Actions (test, GHCR, optional Docker Hub) |
@@ -36,6 +39,21 @@ docker compose up --build
 ```
 
 This starts Redis (RDB + AOF enabled) and the API at [http://localhost:8080](http://localhost:8080). The API is protected by Basic auth, so use the credentials below.
+
+To include the local observability stack, start both Compose files:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build -d
+```
+
+| Service | URL | Credentials |
+| --- | --- | --- |
+| API | [http://localhost:8080](http://localhost:8080) | `fina` / `fina-local-dev` |
+| Prometheus | [http://localhost:9090](http://localhost:9090) | none |
+| Alertmanager | [http://localhost:9093](http://localhost:9093) | none |
+| Grafana | [http://localhost:3000](http://localhost:3000) | `admin` / `admin` (`GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD`) |
+
+The provisioned **fina overview** dashboard shows scrape health, 5xx ratio, latency percentiles, JVM heap, transaction throughput, ledger posting, and backup age.
 
 ### Run locally
 
@@ -69,6 +87,9 @@ curl -u fina:fina-local-dev http://localhost:8080/api/accounts
 
 # Public health check (no credentials required)
 curl http://localhost:8080/actuator/health
+
+# Protected Prometheus metrics
+curl -u fina:fina-local-dev http://localhost:8080/actuator/prometheus
 ```
 
 For Docker Compose, set the credentials before starting the stack:
@@ -145,6 +166,51 @@ docker push <dockerhub-user>/fina:latest
 
 Replace `<dockerhub-user>` with your Docker Hub username.
 
+## Deployment
+
+### Observability
+
+The local stack is defined in `docker-compose.observability.yml`. Prometheus scrapes `/actuator/prometheus` with the same Basic-auth credentials as the API, evaluates the rules in `deploy/observability/prometheus/alerts.yml`, and sends alerts to Alertmanager. Grafana provisions the Prometheus datasource and the **fina overview** dashboard.
+
+Alerts cover service availability, 5xx error ratio, p95 latency, failed business transactions, stale or failed backups, and JVM heap pressure. The `backup` health group also reports `DOWN` when the latest successful backup is older than `FINA_BACKUP_MAX_AGE`.
+
+### Kubernetes
+
+Prerequisites:
+
+- `kubectl` and a cluster with an ingress controller (the manifests assume `ingress-nginx`).
+- A storage class that supports `ReadWriteMany` for the shared Redis data and backup volumes.
+- The Prometheus Operator CRDs only if you apply the monitoring overlay.
+
+Create the runtime secret first; it is intentionally not included in Kustomize:
+
+```bash
+kubectl -n fina create secret generic fina-secrets \
+  --from-literal=FINA_USERNAME=fina \
+  --from-literal=FINA_PASSWORD='change-me' \
+  --from-literal=REDIS_PASSWORD='change-me-too'
+```
+
+Deploy the base resources:
+
+```bash
+kubectl apply -k deploy/k8s/base
+```
+
+Then deploy the ServiceMonitor and PrometheusRule after the operator is installed:
+
+```bash
+kubectl apply -k deploy/k8s/monitoring
+```
+
+The base includes two API replicas, a rolling update with `maxUnavailable: 0`, startup/liveness/readiness probes, an HPA (2–6 replicas at 70% CPU), a PodDisruptionBudget, Redis persistence, and an Ingress for `fina.example.com`. Replace the image and host before production use:
+
+```bash
+kubectl -n fina set image deployment/fina app=kenyaone/fina:sha-<commit>
+```
+
+Redis mounts `fina-redis-data` at `/data`; the API mounts the same volume read-only at `/redis-data` so the backup service can copy `dump.rdb` to `fina-backups`. If your cluster cannot provide `ReadWriteMany`, use a managed Redis service and stream backups to object storage instead of sharing a filesystem.
+
 ## Project Structure
 
 ```text
@@ -155,15 +221,21 @@ fina/
 │   │   │   ├── api/              # REST controllers, DTOs, error handling
 │   │   │   ├── config/           # Redisson, Redis codec, security
 │   │   │   ├── exception/        # Domain exceptions
-│   │   │   ├── model/            # Account, Transaction, Invoice, BackupRecord
+│   │   │   ├── health/           # Backup health indicator
+│   │   │   ├── metrics/          # Micrometer business metrics
+│   │   │   ├── model/            # Accounts, transactions, invoices, ledger
 │   │   │   ├── repository/       # Redis-backed repositories
-│   │   │   ├── service/          # Business logic, locking, analytics, backups
+│   │   │   ├── service/          # Business logic, ledger, locking, backups
 │   │   │   └── FinaApplication.java
-│   │   └── resources/application.yml
-│   └── test/java/com/fina/    # Unit + Redis integration tests
-├── .github/workflows/    # CI/CD pipelines
+│   │   └── resources/            # application.yml, application-prod.yml
+│   └── test/java/com/fina/       # Unit + Redis integration tests
+├── .github/workflows/            # CI/CD pipelines
+├── deploy/
+│   ├── k8s/                      # Kustomize base + monitoring overlay
+│   └── observability/            # Prometheus, Alertmanager, Grafana
 ├── Dockerfile
 ├── docker-compose.yml
+├── docker-compose.observability.yml
 ├── pom.xml
 ├── README.md
 ├── CONTRIBUTING.md
@@ -174,16 +246,19 @@ fina/
 ## Features
 
 - Secure handling of accounts and financial transactions (HTTP Basic auth)
+- Immutable double-entry ledger with balanced journals and a trial-balance endpoint
 - High-concurrency transaction processing with per-account Redisson locks
 - Atomic transfers using a `MultiLock` over both accounts
 - Automated database backups on a schedule (`BGSAVE` via Spring `@Scheduled`)
 - Analytics over transaction history (balances, deposits, withdrawals, invoices)
 - Invoice lifecycle with automatic overdue marking
+- Prometheus metrics, Grafana dashboards, alert rules, and backup health checks
+- Kubernetes deployment with probes, HPA, PDB, and graceful shutdown
 - REST API for clients and integrations
 
 ## API Reference
 
-`/`, `/actuator/health`, and `/actuator/info` are public. All other endpoints require Basic auth.
+`/`, `/actuator/health`, `/actuator/health/**` (including `liveness`, `readiness`, and `backup` groups), and `/actuator/info` are public. All other endpoints, including `/actuator/prometheus`, require Basic auth.
 
 | Method | Path | Description |
 | --- | --- | --- |
@@ -206,6 +281,9 @@ fina/
 | `GET` | `/api/analytics/accounts/{id}` | Per-account analytics |
 | `POST` | `/api/admin/backups` | Trigger an immediate backup |
 | `GET` | `/api/admin/backups` | List backup history |
+| `GET` | `/api/admin/ledger/trial-balance` | Debit/credit totals, account-type totals, and accounting-equation status |
+| `GET` | `/api/admin/ledger/entries` | List ledger entries; filter with `?accountId={id}` |
+| `GET` | `/actuator/prometheus` | Prometheus metrics (Basic auth required) |
 
 Example:
 
@@ -218,6 +296,38 @@ curl -u fina:fina-local-dev -X POST http://localhost:8080/api/accounts/{id}/depo
   -H "Content-Type: application/json" \
   -d '{"amount":25.50,"description":"salary"}'
 ```
+
+## Double-Entry Accounting
+
+Every financial operation writes a balanced journal: total debits must equal total credits, and each journal must contain at least two lines with positive amounts. Posted ledger rows are immutable; `LedgerRepository` exposes no update or delete operations. Correct a posted journal with a new reversing journal, never by editing history.
+
+The ledger uses these system accounts:
+
+| Account | Type | Purpose |
+| --- | --- | --- |
+| `system:cash` | Asset | Cash received or paid |
+| `system:accounts-receivable` | Asset | Invoices issued but not yet paid |
+| `system:revenue` | Equity | Revenue recognized from invoices |
+| Customer account IDs | Liability | Funds owed to customers |
+
+Operation postings:
+
+| Operation | Debit | Credit |
+| --- | --- | --- |
+| Account opening | `system:cash` | customer account |
+| Deposit | `system:cash` | customer account |
+| Withdrawal | customer account | `system:cash` |
+| Transfer | destination customer account | source customer account |
+| Invoice issued | `system:accounts-receivable` | `system:revenue` |
+| Invoice paid | `system:cash` | `system:accounts-receivable` |
+
+Account balances remain a fast projection for the existing account APIs; the ledger is the authoritative journal. Check the accounting equation at any time:
+
+```bash
+curl -u fina:fina-local-dev http://localhost:8080/api/admin/ledger/trial-balance
+```
+
+The response includes `totalDebits`, `totalCredits`, `assets`, `liabilities`, `equity`, `balanced` (debits equal credits), and `equationBalanced` (`assets == liabilities + equity`).
 
 ## Configuration
 
@@ -233,7 +343,9 @@ curl -u fina:fina-local-dev -X POST http://localhost:8080/api/accounts/{id}/depo
 | `FINA_BACKUP_CRON` | `0 0 * * * *` | Backup schedule (hourly) |
 | `FINA_BACKUP_DIRECTORY` | empty | Local directory for copied `.rdb` files |
 | `FINA_REDIS_DUMP_PATH` | `dump.rdb` | Path to Redis `dump.rdb` |
+| `FINA_BACKUP_MAX_AGE` | `2h` | Maximum age before the `backup` health group reports `DOWN` |
 | `FINA_INVOICE_OVERDUE_CRON` | `0 5 0 * * *` | Daily overdue-invoice sweep |
+| `PORT` | `8080` | HTTP port |
 
 > Change the default credentials outside local development.
 
@@ -498,6 +610,9 @@ sequenceDiagram
 - [x] Add Docker Compose for local development
 - [x] Add Redis/Testcontainers integration tests
 - [x] Add CI/CD with automated image publishing
+- [x] Add immutable double-entry ledger and trial balance
+- [x] Add Prometheus metrics, Grafana dashboards, and alert rules
+- [x] Add Kubernetes manifests with probes, HPA, and PDB
 - [ ] Deploy Redis with Sentinel or Cluster for automated failover
 - [ ] Add backup restore workflow
 - [ ] Stream backups to cloud storage (e.g., AWS S3)

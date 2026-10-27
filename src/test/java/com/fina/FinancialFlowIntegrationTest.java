@@ -1,8 +1,9 @@
 package com.fina;
 
+import com.fina.api.dto.AnalyticsSummary;
 import com.fina.api.dto.CreateAccountRequest;
 import com.fina.api.dto.CreateInvoiceRequest;
-import com.fina.api.dto.AnalyticsSummary;
+import com.fina.api.dto.TrialBalance;
 import com.fina.model.Account;
 import com.fina.model.BackupRecord;
 import com.fina.model.BackupStatus;
@@ -13,6 +14,7 @@ import com.fina.service.AccountService;
 import com.fina.service.AnalyticsService;
 import com.fina.service.BackupService;
 import com.fina.service.InvoiceService;
+import com.fina.service.LedgerService;
 import com.fina.service.TransactionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -68,6 +70,9 @@ class FinancialFlowIntegrationTest {
 
     @Autowired
     private BackupService backupService;
+
+    @Autowired
+    private LedgerService ledgerService;
 
     @Autowired
     private RedissonClient redissonClient;
@@ -134,6 +139,14 @@ class FinancialFlowIntegrationTest {
         BackupRecord backup = backupService.trigger();
         assertEquals(BackupStatus.SUCCESS, backup.status());
         assertTrue(backup.message().contains("BGSAVE"));
+
+        TrialBalance trialBalance = ledgerService.trialBalance();
+        assertTrue(trialBalance.balanced());
+        assertTrue(trialBalance.equationBalanced());
+        assertEquals(0, trialBalance.assets().compareTo(
+                trialBalance.liabilities().add(trialBalance.equity())
+        ));
+        assertEquals(14, ledgerService.entries(null).size());
     }
 
     @Test

@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: fina
+  namespace: fina
+  labels:
+    app.kubernetes.io/name: fina
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fina
+      app.kubernetes.io/component: api
